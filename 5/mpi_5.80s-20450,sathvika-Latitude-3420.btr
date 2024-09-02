@@ -1,7 +1,0 @@
-
-mpi_5:20450 terminated with signal 11 at PC=5b2752abc476 SP=7fff33d033c0.  Backtrace:
-./mpi_5(+0x3476)[0x5b2752abc476]
-./mpi_5(+0x2ae9)[0x5b2752abbae9]
-/lib/x86_64-linux-gnu/libc.so.6(+0x29d90)[0x708089e29d90]
-/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x80)[0x708089e29e40]
-./mpi_5(+0x2465)[0x5b2752abb465]

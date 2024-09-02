@@ -4,7 +4,7 @@
 module load openmpi
 
 # Compile the MPI program
-mpicxx -o mpi_4 mpi_4.cpp  # Compile mpi_4.cpp into an executable named mpi_4
+mpicxx -o mpi_5 5.cpp  # Compile mpi_4.cpp into an executable named mpi_4
 
 # Create or clear the output file
 output_file="output.txt"
@@ -22,7 +22,7 @@ do
         start_time=$(date +%s%N)  # Start time in nanoseconds
         
         # Run the MPI program and append output to output.txt
-        mpirun --oversubscribe -np $np ./mpi_4 ./test_case_${testcase}.txt >> output_${testcase}_${np}.txt
+        mpirun --oversubscribe -np $np ./mpi_5 ./test_case_${testcase}.txt >> output_${testcase}_${np}.txt
         
         # Calculate and store the time taken
         end_time=$(date +%s%N)  # End time in nanoseconds

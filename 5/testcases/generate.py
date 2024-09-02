@@ -20,9 +20,10 @@ def matrix_chain_order(p):
 
 # Function to generate test cases and save them
 def generate_test_cases(num_cases=10, min_size=1, max_size=500, filename_prefix="test_case_"):
-    for case_num in range(1, num_cases + 1):
+    for case_num in range(0, num_cases ):
         # Generate a random size for the matrix chain
-        size = random.randint(min_size, max_size)
+        sizes = [50,100,150,200,250,300,350,400,450,500]
+        size=sizes[case_num]
         # Generate random dimensions between 1 and 1000 for each matrix
         p = [random.randint(1, 1000) for _ in range(size + 1)]
         
@@ -30,12 +31,12 @@ def generate_test_cases(num_cases=10, min_size=1, max_size=500, filename_prefix=
         solution = matrix_chain_order(p)
         
         # Save the input in a file
-        with open(f"{filename_prefix}{case_num}_input.txt", "w") as input_file:
+        with open(f"{filename_prefix}{case_num+1}_input.txt", "w") as input_file:
             input_file.write(f"{size}\n")
             input_file.write(" ".join(map(str, p)) + "\n")
         
         # Save the solution in a file
-        with open(f"{filename_prefix}{case_num}_output.txt", "w") as output_file:
+        with open(f"{filename_prefix}{case_num+1}_output.txt", "w") as output_file:
             output_file.write(f"{solution}\n")
 
 # Generate the test cases

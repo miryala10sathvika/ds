@@ -1,3 +1,258 @@
+
+# Report: Julia Set Calculation with MPI
+
+## Key Components
+
+
+### Broadcasting Data
+
+```cpp
+MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+MPI_Bcast(&m, 1, MPI_INT, 0, MPI_COMM_WORLD);
+MPI_Bcast(&k, 1, MPI_INT, 0, MPI_COMM_WORLD);
+MPI_Bcast(&a, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+MPI_Bcast(&b, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+```
+
+- **Description**: Distributes the dimensions and parameters from the root process to all other processes using `MPI_Bcast`.
+
+### Distribution of Work
+
+```cpp
+int rows_per_process = n / world_size;
+int remainder = n % world_size;
+int start_row = world_rank * rows_per_process + std::min(world_rank, remainder);
+int end_row = start_row + rows_per_process + (world_rank < remainder ? 1 : 0);
+int local_rows = end_row - start_row;
+```
+
+- **Description**: Calculates the number of rows each process will handle. Handles cases where `n` is not perfectly divisible by the number of processes (`world_size`).
+
+### Julia Set Computation
+
+```cpp
+for (int i = 0; i < local_rows; ++i) {
+    for (int j = 0; j < m; ++j) {
+        std::complex<float> z(x[j], y[start_row + i]);
+        int count = 0;
+        while (count < k + 3 && std::norm(z) <= 4) {
+            z = z * z + std::complex<float>(a, b);
+            count++;
+        }
+        local_matrix[i][j] = (count > k + 1) ? 1 : 0;
+    }
+}
+```
+
+- **Description**: Computes the Julia set for the local rows of the matrix. The Julia set is computed using the iterative formula and is stored in the local matrix.
+
+### Gathering Results
+
+```cpp
+std::vector<int> recvcounts(world_size);
+std::vector<int> displs(world_size);
+
+for (int i = 0; i < world_size; ++i) {
+    recvcounts[i] = (n / world_size + (i < remainder ? 1 : 0)) * m;
+    displs[i] = (i * (n / world_size) + std::min(i, remainder)) * m;
+}
+
+std::vector<int> local_flattened(local_rows * m);
+for (int i = 0; i < local_rows; ++i) {
+    std::copy(local_matrix[i].begin(), local_matrix[i].end(), local_flattened.begin() + i * m);
+}
+
+std::vector<int> gathered_result;
+if (world_rank == 0) {
+    gathered_result.resize(n * m);
+}
+
+MPI_Gatherv(local_flattened.data(), local_rows * m, MPI_INT,
+            gathered_result.data(), recvcounts.data(), displs.data(), MPI_INT,
+            0, MPI_COMM_WORLD);
+```
+
+- **Description**: Collects the results from all processes and assembles them into a single matrix on the root process using `MPI_Gatherv`.
+
+Let's break down the time complexity, message complexity, and space requirements of the given MPI-based Julia set computation program.
+### Time Complexity
+
+The code computes the Julia set for an \( n \times m \) grid of points. The main computational task involves a nested loop to determine if each point belongs to the Julia set.
+
+1. **Initialization and File I/O**:
+    - **File I/O**: Constant-time operation with respect to grid size.
+    - **Broadcasting**: Time complexity is \( O(\log P) \), where \( P \) is the number of processes. This is negligible compared to the computational complexity.
+
+2. **Main Computation**:
+    - Each point in the grid requires at most \( O(k) \) iterations to check if it belongs to the Julia set, where \( k \) is the maximum iteration count.
+    - Each process handles \( \frac{n}{P} \times m \) points, so the time complexity per process is \( O\left(\frac{n}{P} \times m \times k\right) \).
+    - Total time complexity across all processes is \( O(n \times m \times k) \).
+
+3. **Gathering Results**:
+    - The `MPI_Gatherv` operation involves gathering \( O(n \times m) \) data from all processes. This operation does not change the overall time complexity.
+
+### Total Time Complexity: 
+**\( O(n \times m \times k) \)**
+
+### Message Complexity
+
+1. **Broadcasting**:
+    - Broadcasting parameters requires \( O(\log P) \) messages.
+
+2. **Gathering**:
+    - The `MPI_Gatherv` operation requires \( O(P) \) messages, with each message containing \( O\left(\frac{n \times m}{P}\right) \) elements.
+
+### Total Message Complexity: 
+**\( O(P) \)** messages for gathering and **\( O(\log P) \)** for broadcasting.
+
+### Space Requirements
+
+1. **Local Memory**:
+    - Each process allocates memory for \( \frac{n}{P} \times m \) elements. Thus, per process space requirement is \( O\left(\frac{n \times m}{P}\right) \).
+
+2. **Gathered Results (Root Process Only)**:
+    - The root process requires space for the entire \( n \times m \) grid. Thus, the space complexity on the root process is \( O(n \times m) \).
+
+### Total Space Complexity:
+- **Per Process**: \( O\left(\frac{n \times m}{P}\right) \).
+- **Root Process**: \( O(n \times m) \).
+
+### Summary:
+- **Time Complexity**: \( O(n \times m \times k) \).
+- **Message Complexity**: \( O(P) \) for gathering, \( O(\log P) \) for broadcasting.
+- **Space Complexity**: \( O\left(\frac{n \times m}{P}\right) \) per process, \( O(n \times m) \) on the root process.
+### RESULTS
+from the below results we can see that as number of processes increasing due to communication overhead the time is increasing(in 100s) in lower Ns signifactly , but as you go on increasing the N to 10000 , we can see there the minimum differnt in the communication overhead.Necessarily for the very big N~100000 we see there computation is heavier than that of communication so the higher the number of processes.But we observe the trend where for 2 processes the time is optimum.This the sweet spot where the communication overhead is very less and efficient parallelisation is done.
+
+| Group | Item | Value     |
+|-------|------|-----------|
+| 1     | 1    | 0.418399  |
+| 1     | 2    | 0.271621  |
+| 1     | 3    | 0.530665  |
+| 1     | 4    | 0.432962  |
+| 1     | 5    | 0.556229  |
+| 1     | 6    | 0.486830  |
+| 1     | 7    | 0.428529  |
+| 1     | 8    | 0.466052  |
+| 1     | 9    | 0.502719  |
+| 1     | 10   | 0.483175  |
+| 1     | 11   | 0.489395  |
+| 1     | 12   | 0.460729  |
+| 2     | 1    | 1.672469  |
+| 2     | 2    | 1.084312  |
+| 2     | 3    | 1.944141  |
+| 2     | 4    | 1.743174  |
+| 2     | 5    | 2.074971  |
+| 2     | 6    | 1.952832  |
+| 2     | 7    | 2.068818  |
+| 2     | 8    | 1.929439  |
+| 2     | 9    | 1.905748  |
+| 2     | 10   | 1.901101  |
+| 2     | 11   | 1.959889  |
+| 2     | 12   | 1.949509  |
+| 3     | 1    | 3.762579  |
+| 3     | 2    | 2.484539  |
+| 3     | 3    | 4.097256  |
+| 3     | 4    | 3.860489  |
+| 3     | 5    | 4.652269  |
+| 3     | 6    | 4.379219  |
+| 3     | 7    | 4.713424  |
+| 3     | 8    | 4.339425  |
+| 3     | 9    | 4.583908  |
+| 3     | 10   | 4.381725  |
+| 3     | 11   | 4.533711  |
+| 3     | 12   | 4.427797  |
+| 4     | 1    | 6.709179  |
+| 4     | 2    | 4.346900  |
+| 4     | 3    | 7.968688  |
+| 4     | 4    | 7.007444  |
+| 4     | 5    | 8.268361  |
+| 4     | 6    | 7.629407  |
+| 4     | 7    | 8.428111  |
+| 4     | 8    | 7.721466  |
+| 4     | 9    | 8.266927  |
+| 4     | 10   | 7.872602  |
+| 4     | 11   | 7.951818  |
+| 4     | 12   | 8.187583  |
+| 5     | 1    | 10.439870 |
+| 5     | 2    | 6.790893  |
+| 5     | 3    | 12.512330 |
+| 5     | 4    | 10.732692 |
+| 5     | 5    | 13.221910 |
+| 5     | 6    | 12.120233 |
+| 5     | 7    | 13.153631 |
+| 5     | 8    | 12.063286 |
+| 5     | 9    | 12.330760 |
+| 5     | 10   | 12.307764 |
+| 5     | 11   | 12.302895 |
+| 5     | 12   | 12.371549 |
+| 6     | 1    | 15.047542 |
+| 6     | 2    | 9.783156  |
+| 6     | 3    | 16.607919 |
+| 6     | 4    | 15.422435 |
+| 6     | 5    | 18.966136 |
+| 6     | 6    | 17.366866 |
+| 6     | 7    | 18.840645 |
+| 6     | 8    | 17.216053 |
+| 6     | 9    | 17.870908 |
+| 6     | 10   | 17.765248 |
+| 6     | 11   | 17.883103 |
+| 6     | 12   | 17.714719 |
+| 7     | 1    | 20.549823 |
+| 7     | 2    | 13.315444 |
+| 7     | 3    | 25.130237 |
+| 7     | 4    | 21.028130 |
+| 7     | 5    | 25.627594 |
+| 7     | 6    | 23.765100 |
+| 7     | 7    | 25.773281 |
+| 7     | 8    | 23.667072 |
+| 7     | 9    | 25.204430 |
+| 7     | 10   | 24.077170 |
+| 7     | 11   | 23.214946 |
+| 7     | 12   | 23.964617 |
+| 8     | 1    | 26.721856 |
+| 8     | 2    | 17.386029 |
+| 8     | 3    | 31.289020 |
+| 8     | 4    | 27.413314 |
+| 8     | 5    | 33.695078 |
+| 8     | 6    | 31.180747 |
+| 8     | 7    | 33.023521 |
+| 8     | 8    | 30.882872 |
+| 8     | 9    | 31.324458 |
+| 8     | 10   | 31.263512 |
+| 8     | 11   | 32.057683 |
+| 8     | 12   | 30.783369 |
+| 9     | 1    | 33.835550 |
+| 9     | 2    | 22.014147 |
+| 9     | 3    | 40.542649 |
+| 9     | 4    | 34.714486 |
+| 9     | 5    | 42.831312 |
+| 9     | 6    | 39.453186 |
+| 9     | 7    | 42.634636 |
+| 9     | 8    | 39.257146 |
+| 9     | 9    | 40.746743 |
+| 9     | 10   | 39.988665 |
+| 9     | 11   | 39.358910 |
+| 9     | 12   | 39.100902 |
+| 10    | 1    | 41.746663 |
+| 10    | 2    | 27.175386 |
+| 10    | 3    | 48.830116 |
+| 10    | 4    | 43.358064 |
+| 10    | 5    | 53.085431 |
+| 10    | 6    | 48.718575 |
+| 10    | 7    | 52.993408 |
+| 10    | 8    | 48.272170 |
+| 10    | 9    | 51.000888 |
+| 10    | 10   | 47.486321 |
+| 10    | 11   | 49.184575 |
+| 10    | 12   | 50.080222 |
+
+![Alt text](./2/execution.png)
+## Summary
+
+The program efficiently calculates the Julia set using MPI by distributing the computation across multiple processes. The key steps include broadcasting input data, computing the Julia set locally, and then gathering the results on the root process. This approach leverages parallelism to handle large-scale computations more efficiently. The time complexity is mainly influenced by the number of iterations for each point and the size of the matrix, while the message complexity involves broadcasting and gathering data across processes.
+
+
 ## Report on MPI-Based Matrix Inversion Program
 
 ### Overview
@@ -100,23 +355,61 @@ void gather_result(const std::vector<float>& local_I_flat, std::vector<float>& I
 
 `MPI_Gatherv` is used to collect the partial results from all processes and assemble the final inverted matrix.
 
-### Time Complexity
+Here's a detailed analysis of your MPI-based matrix computation program, focusing on time complexity, message complexity, and space requirements:
 
-The time complexity of the matrix inversion process primarily depends on:
+## Time Complexity
 
-1. **Matrix Distribution**: \(O(N^2)\) for sending and receiving the matrix data.
-2. **Pivoting and Elimination**: Each pivot operation involves updating rows in the matrix, which can be approximated as \(O(N^3)\) for Gaussian elimination. However, since the work is distributed, the complexity for each process is \(O((N^2 / p) \cdot N)\), where \(p\) is the number of processes.
+1. **File Reading and Initialization**:
+   - **File Reading**: Only the root process reads the file and initializes the matrix \( A \). This operation is \( O(N^2) \) as it involves reading all \( N \times N \) elements.
+   - **Initialization**: Broadcasting the size \( N \) and initializing identity matrix \( I \) is done in \( O(N^2) \) time by the root process.
 
-Overall, the distributed matrix inversion has a time complexity of approximately \(O(N^3 / p)\), assuming an ideal load balance.
+2. **Distribution of Matrix**:
+   - **Distribution**: The `distribute_matrix` function scatters rows of matrix \( A \) among processes. The complexity is \( O(N^2) \) for scattering the entire matrix.
 
-### Message Complexity
+3. **Pivot Search and Update**:
+   - **Pivot Search**: Each process searches for a valid pivot row in its local portion of the matrix. This operation involves scanning a portion of matrix \( A \), which is \( O(N^2 / P) \) for each process. The global search for the pivot and broadcasting operations can also be considered as \( O(N^2) \) since each process contributes to finding and broadcasting pivot information.
+   - **Pivot Update**: Updating the matrix involves iterating over rows and columns. For each row \( i \), the updates involve scanning and modifying matrix rows which is \( O(N^2) \) in total across all processes, considering that each row \( i \) is updated in all \( N \) columns.
 
-The message complexity is determined by:
+4. **Gathering Results**:
+   - **Gathering Results**: Collecting results from all processes involves gathering the entire \( N \times N \) matrix, which is \( O(N^2) \) for the root process.
 
-1. **Matrix Distribution**: Each process receives and sends \(O(N^2)\) elements.
-2. **Pivot Data Exchange**: Involves broadcasting and sending rows of the matrix, resulting in communication costs proportional to \(O(N)\) per pivot operation.
+5. **Overall Time Complexity**:
+   - The most time-consuming operation is the pivot search and matrix update, which is \( O(N^2) \). Thus, the overall time complexity of the program is:
+   - **Total Time Complexity**: \( O(N^2) \).
 
-In total, the message complexity involves multiple broadcasts and gathers, with the total amount of data transferred being proportional to \(O(N^2)\) for matrix distribution and \(O(N^2 \cdot \log p)\) for pivot operations, where \(\log p\) represents the number of communication steps due to broadcasting.
+## Message Complexity
+
+1. **Broadcasting Parameters**:
+   - **Broadcasting \( N \)**: Broadcasting the integer \( N \) takes \( O(\log P) \) messages where \( P \) is the number of processes.
+   - **Broadcasting Send Counts**: Broadcasting the array of send counts involves \( O(\log P) \) messages.
+
+2. **Gathering Matrix Results**:
+   - **Gathering Results**: The `MPI_Gatherv` operation involves sending and receiving \( O(N^2) \) elements. Each process sends its portion of the matrix and the root collects these. The total message complexity is \( O(P) \) messages as each process contributes to gathering.
+
+3. **Pivot Row Broadcast**:
+   - **Pivot Row Data**: Broadcasting pivot row data involves sending \( O(N) \) elements per broadcast. Each pivot row is broadcasted potentially multiple times, but the number of broadcasts per row is proportional to \( O(N) \).
+
+4. **Overall Message Complexity**:
+   - Considering broadcasting parameters and gathering results, the total message complexity is:
+   - **Total Message Complexity**: \( O(P) \) for gathering and \( O(\log P) \) for broadcasting parameters and pivot rows.
+
+## Space Requirements
+
+1. **Local Memory**:
+   - **Local Matrices**: Each process requires space for its portion of matrix \( A \) and the identity matrix \( I \). This is \( O(N^2 / P) \) for matrix \( A \) and \( O(N^2 / P) \) for the identity matrix.
+
+2. **Gathered Results**:
+   - **Root Process**: The root process needs to store the entire \( N \times N \) matrix \( I \) after gathering results. This requires \( O(N^2) \) space.
+
+3. **Overall Space Complexity**:
+   - **Per Process**: \( O(N^2 / P) \) for local matrices.
+   - **Root Process**: \( O(N^2) \) for storing the gathered results.
+
+### Summary
+
+- **Time Complexity**: \( O(N^2) \)
+- **Message Complexity**: \( O(P) \) for gathering, \( O(\log P) \) for broadcasting parameters and pivot rows.
+- **Space Complexity**: \( O(N^2 / P) \) per process, \( O(N^2) \) on the root process.
 
 
 ### RESULTS
@@ -278,264 +571,3 @@ The provided MPI-based matrix inversion program leverages parallel processing to
 
 
 
-
-# Report: Julia Set Calculation with MPI
-
-## Key Components
-
-
-### Broadcasting Data
-
-```cpp
-MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
-MPI_Bcast(&m, 1, MPI_INT, 0, MPI_COMM_WORLD);
-MPI_Bcast(&k, 1, MPI_INT, 0, MPI_COMM_WORLD);
-MPI_Bcast(&a, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-MPI_Bcast(&b, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
-```
-
-- **Description**: Distributes the dimensions and parameters from the root process to all other processes using `MPI_Bcast`.
-
-### Distribution of Work
-
-```cpp
-int rows_per_process = n / world_size;
-int remainder = n % world_size;
-int start_row = world_rank * rows_per_process + std::min(world_rank, remainder);
-int end_row = start_row + rows_per_process + (world_rank < remainder ? 1 : 0);
-int local_rows = end_row - start_row;
-```
-
-- **Description**: Calculates the number of rows each process will handle. Handles cases where `n` is not perfectly divisible by the number of processes (`world_size`).
-
-### Julia Set Computation
-
-```cpp
-for (int i = 0; i < local_rows; ++i) {
-    for (int j = 0; j < m; ++j) {
-        std::complex<float> z(x[j], y[start_row + i]);
-        int count = 0;
-        while (count < k + 3 && std::norm(z) <= 4) {
-            z = z * z + std::complex<float>(a, b);
-            count++;
-        }
-        local_matrix[i][j] = (count > k + 1) ? 1 : 0;
-    }
-}
-```
-
-- **Description**: Computes the Julia set for the local rows of the matrix. The Julia set is computed using the iterative formula and is stored in the local matrix.
-
-### Gathering Results
-
-```cpp
-std::vector<int> recvcounts(world_size);
-std::vector<int> displs(world_size);
-
-for (int i = 0; i < world_size; ++i) {
-    recvcounts[i] = (n / world_size + (i < remainder ? 1 : 0)) * m;
-    displs[i] = (i * (n / world_size) + std::min(i, remainder)) * m;
-}
-
-std::vector<int> local_flattened(local_rows * m);
-for (int i = 0; i < local_rows; ++i) {
-    std::copy(local_matrix[i].begin(), local_matrix[i].end(), local_flattened.begin() + i * m);
-}
-
-std::vector<int> gathered_result;
-if (world_rank == 0) {
-    gathered_result.resize(n * m);
-}
-
-MPI_Gatherv(local_flattened.data(), local_rows * m, MPI_INT,
-            gathered_result.data(), recvcounts.data(), displs.data(), MPI_INT,
-            0, MPI_COMM_WORLD);
-```
-
-- **Description**: Collects the results from all processes and assembles them into a single matrix on the root process using `MPI_Gatherv`.
-
-Let's break down the time complexity, message complexity, and space requirements of the given MPI-based Julia set computation program.
-
-### Time Complexity
-
-The code computes the Julia set for an \( n \times m \) grid of points. The main computational task is the nested loop that calculates whether each point belongs to the Julia set. 
-
-1. **Initialization and File I/O**: The reading of the file and broadcasting of parameters involves:
-    - **File I/O (Rank 0 only)**: This is a constant-time operation with respect to the grid size, though it does depend on the number of processes in the worst-case for the broadcast. 
-    - **Broadcasting**: The broadcast operation has a time complexity of \( O(\log P) \), where \( P \) is the number of processes. The broadcasting time is negligible compared to the computation time, so we'll focus more on the computational aspect.
-
-2. **Main Computation**:
-    - The computation of the Julia set is done on a grid of size \( n \times m \). Each point in the grid requires at most \( O(k) \) iterations to determine if it belongs to the set, where \( k \) is the maximum iteration count.
-    - Each process computes the Julia set for its assigned rows, so the time complexity for this part is \( O\left(\frac{n}{P} \times m \times k\right) \) for each process, where \( P \) is the number of processes.
-    - The total time complexity across all processes is therefore \( O(n \times m \times k) \).
-
-3. **Gathering Results**:
-    - The `MPI_Gatherv` operation gathers the results from all processes. This involves collecting \( O(n \times m) \) data, which takes \( O(\frac{n \times m}{P}) \) time for each process and the same for the root process to assemble the final matrix. Since this is done in parallel, the overall time complexity remains \( O(n \times m \times k) \).
-
-### Total Time Complexity: 
-**\( O(n \times m \times k) \)**.
-
-### Message Complexity
-
-The message complexity refers to the number of messages exchanged between processes during the execution of the program.
-
-1. **Broadcasting**:
-    - Broadcasting the parameters (`n`, `m`, `k`, `a`, `b`) requires \( O(\log P) \) messages, with each process receiving 5 values (2 integers and 3 floats).
-
-2. **Gathering**:
-    - The `MPI_Gatherv` operation involves \( P \) processes sending data to the root. In total, \( P \) messages are sent, each containing \( O\left(\frac{n \times m}{P}\right) \) data elements.
-
-### Total Message Complexity: 
-**\( O(P) \)** messages for gathering and **\( O(\log P) \)** for broadcasting.
-
-### Space Requirements
-
-The space complexity includes the memory required for storing the matrices and intermediate results:
-
-1. **Local Memory**:
-    - Each process allocates memory for its part of the grid. Each process handles \( \frac{n}{P} \times m \) elements. Thus, the space requirement per process is \( O\left(\frac{n \times m}{P}\right) \).
-
-2. **Gathered Results (Root Process Only)**:
-    - The root process needs to allocate space for the entire \( n \times m \) grid to gather the results from all processes. Therefore, the space complexity on the root process is \( O(n \times m) \).
-
-### Total Space Complexity:
-- **Per Process**: \( O\left(\frac{n \times m}{P}\right) \).
-- **Root Process**: \( O(n \times m) \).
-
-### Summary:
-- **Time Complexity**: \( O(n \times m \times k) \).
-- **Message Complexity**: \( O(P) \) for gathering, \( O(\log P) \) for broadcasting.
-- **Space Complexity**: \( O\left(\frac{n \times m}{P}\right) \) per process, \( O(n \times m) \) on the root process. 
-
-These complexities are derived based on the structure of the code and the operations performed in each part of the distributed computation. The computation is dominated by the nested loop for calculating the Julia set, leading to the \( O(n \times m \times k) \) time complexity. The gathering and broadcasting operations contribute to the message complexity and space requirements as discussed.
-
-### RESULTS
-from the below results we can see that as number of processes increasing due to communication overhead the time is increasing(in 100s) in lower Ns signifactly , but as you go on increasing the N to 10000 , we can see there the minimum differnt in the communication overhead.Necessarily for the very big N~100000 we see there computation is heavier than that of communication so the higher the number of processes.But we observe the trend where for 2 processes the time is optimum.This the sweet spot where the communication overhead is very less and efficient parallelisation is done.
-
-| Group | Item | Value     |
-|-------|------|-----------|
-| 1     | 1    | 0.418399  |
-| 1     | 2    | 0.271621  |
-| 1     | 3    | 0.530665  |
-| 1     | 4    | 0.432962  |
-| 1     | 5    | 0.556229  |
-| 1     | 6    | 0.486830  |
-| 1     | 7    | 0.428529  |
-| 1     | 8    | 0.466052  |
-| 1     | 9    | 0.502719  |
-| 1     | 10   | 0.483175  |
-| 1     | 11   | 0.489395  |
-| 1     | 12   | 0.460729  |
-| 2     | 1    | 1.672469  |
-| 2     | 2    | 1.084312  |
-| 2     | 3    | 1.944141  |
-| 2     | 4    | 1.743174  |
-| 2     | 5    | 2.074971  |
-| 2     | 6    | 1.952832  |
-| 2     | 7    | 2.068818  |
-| 2     | 8    | 1.929439  |
-| 2     | 9    | 1.905748  |
-| 2     | 10   | 1.901101  |
-| 2     | 11   | 1.959889  |
-| 2     | 12   | 1.949509  |
-| 3     | 1    | 3.762579  |
-| 3     | 2    | 2.484539  |
-| 3     | 3    | 4.097256  |
-| 3     | 4    | 3.860489  |
-| 3     | 5    | 4.652269  |
-| 3     | 6    | 4.379219  |
-| 3     | 7    | 4.713424  |
-| 3     | 8    | 4.339425  |
-| 3     | 9    | 4.583908  |
-| 3     | 10   | 4.381725  |
-| 3     | 11   | 4.533711  |
-| 3     | 12   | 4.427797  |
-| 4     | 1    | 6.709179  |
-| 4     | 2    | 4.346900  |
-| 4     | 3    | 7.968688  |
-| 4     | 4    | 7.007444  |
-| 4     | 5    | 8.268361  |
-| 4     | 6    | 7.629407  |
-| 4     | 7    | 8.428111  |
-| 4     | 8    | 7.721466  |
-| 4     | 9    | 8.266927  |
-| 4     | 10   | 7.872602  |
-| 4     | 11   | 7.951818  |
-| 4     | 12   | 8.187583  |
-| 5     | 1    | 10.439870 |
-| 5     | 2    | 6.790893  |
-| 5     | 3    | 12.512330 |
-| 5     | 4    | 10.732692 |
-| 5     | 5    | 13.221910 |
-| 5     | 6    | 12.120233 |
-| 5     | 7    | 13.153631 |
-| 5     | 8    | 12.063286 |
-| 5     | 9    | 12.330760 |
-| 5     | 10   | 12.307764 |
-| 5     | 11   | 12.302895 |
-| 5     | 12   | 12.371549 |
-| 6     | 1    | 15.047542 |
-| 6     | 2    | 9.783156  |
-| 6     | 3    | 16.607919 |
-| 6     | 4    | 15.422435 |
-| 6     | 5    | 18.966136 |
-| 6     | 6    | 17.366866 |
-| 6     | 7    | 18.840645 |
-| 6     | 8    | 17.216053 |
-| 6     | 9    | 17.870908 |
-| 6     | 10   | 17.765248 |
-| 6     | 11   | 17.883103 |
-| 6     | 12   | 17.714719 |
-| 7     | 1    | 20.549823 |
-| 7     | 2    | 13.315444 |
-| 7     | 3    | 25.130237 |
-| 7     | 4    | 21.028130 |
-| 7     | 5    | 25.627594 |
-| 7     | 6    | 23.765100 |
-| 7     | 7    | 25.773281 |
-| 7     | 8    | 23.667072 |
-| 7     | 9    | 25.204430 |
-| 7     | 10   | 24.077170 |
-| 7     | 11   | 23.214946 |
-| 7     | 12   | 23.964617 |
-| 8     | 1    | 26.721856 |
-| 8     | 2    | 17.386029 |
-| 8     | 3    | 31.289020 |
-| 8     | 4    | 27.413314 |
-| 8     | 5    | 33.695078 |
-| 8     | 6    | 31.180747 |
-| 8     | 7    | 33.023521 |
-| 8     | 8    | 30.882872 |
-| 8     | 9    | 31.324458 |
-| 8     | 10   | 31.263512 |
-| 8     | 11   | 32.057683 |
-| 8     | 12   | 30.783369 |
-| 9     | 1    | 33.835550 |
-| 9     | 2    | 22.014147 |
-| 9     | 3    | 40.542649 |
-| 9     | 4    | 34.714486 |
-| 9     | 5    | 42.831312 |
-| 9     | 6    | 39.453186 |
-| 9     | 7    | 42.634636 |
-| 9     | 8    | 39.257146 |
-| 9     | 9    | 40.746743 |
-| 9     | 10   | 39.988665 |
-| 9     | 11   | 39.358910 |
-| 9     | 12   | 39.100902 |
-| 10    | 1    | 41.746663 |
-| 10    | 2    | 27.175386 |
-| 10    | 3    | 48.830116 |
-| 10    | 4    | 43.358064 |
-| 10    | 5    | 53.085431 |
-| 10    | 6    | 48.718575 |
-| 10    | 7    | 52.993408 |
-| 10    | 8    | 48.272170 |
-| 10    | 9    | 51.000888 |
-| 10    | 10   | 47.486321 |
-| 10    | 11   | 49.184575 |
-| 10    | 12   | 50.080222 |
-
-![Alt text](./2/execution.png)
-## Summary
-
-The program efficiently calculates the Julia set using MPI by distributing the computation across multiple processes. The key steps include broadcasting input data, computing the Julia set locally, and then gathering the results on the root process. This approach leverages parallelism to handle large-scale computations more efficiently. The time complexity is mainly influenced by the number of iterations for each point and the size of the matrix, while the message complexity involves broadcasting and gathering data across processes.

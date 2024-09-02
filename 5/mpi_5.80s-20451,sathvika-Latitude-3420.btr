@@ -1,7 +1,0 @@
-
-mpi_5:20451 terminated with signal 11 at PC=5a71e0ec1476 SP=7ffcb116ea30.  Backtrace:
-./mpi_5(+0x3476)[0x5a71e0ec1476]
-./mpi_5(+0x2ae9)[0x5a71e0ec0ae9]
-/lib/x86_64-linux-gnu/libc.so.6(+0x29d90)[0x7a0a62229d90]
-/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x80)[0x7a0a62229e40]
-./mpi_5(+0x2465)[0x5a71e0ec0465]
