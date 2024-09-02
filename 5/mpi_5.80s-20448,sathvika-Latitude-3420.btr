@@ -1,0 +1,7 @@
+
+mpi_5:20448 terminated with signal 11 at PC=64f0561e1476 SP=7ffe16e4b5d0.  Backtrace:
+./mpi_5(+0x3476)[0x64f0561e1476]
+./mpi_5(+0x2ae9)[0x64f0561e0ae9]
+/lib/x86_64-linux-gnu/libc.so.6(+0x29d90)[0x73cae8029d90]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x80)[0x73cae8029e40]
+./mpi_5(+0x2465)[0x64f0561e0465]
